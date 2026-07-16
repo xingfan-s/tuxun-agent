@@ -39,6 +39,71 @@ class BaseMapService(ABC):
     async def get_streetview(self, lat: float, lng: float) -> bytes | None: ...
 
 
+# ---------- Amap (高德) ----------
+
+class AmapService(BaseMapService):
+    BASE = "https://restapi.amap.com/v3"
+
+    def __init__(self, api_key: str | None = None):
+        settings = get_settings()
+        self.api_key = api_key or settings.amap_api_key
+        self.client = httpx.AsyncClient(timeout=15)
+
+    async def geocode(self, address: str) -> list[GeoResult]:
+        resp = await self.client.get(
+            f"{self.BASE}/geocode/geo",
+            params={"key": self.api_key, "address": address},
+        )
+        data = resp.json()
+        if data.get("status") != "1" or not data.get("geocodes"):
+            return []
+        result = []
+        for g in data["geocodes"]:
+            lng, lat = g["location"].split(",")
+            result.append(GeoResult(
+                lat=float(lat), lng=float(lng),
+                display_name=g.get("formatted_address", address),
+            ))
+        return result
+
+    async def reverse_geocode(self, lat: float, lng: float) -> GeoResult | None:
+        resp = await self.client.get(
+            f"{self.BASE}/geocode/regeo",
+            params={"key": self.api_key, "location": f"{lng},{lat}", "extensions": "base"},
+        )
+        data = resp.json()
+        if data.get("status") != "1" or not data.get("regeocode"):
+            return None
+        rg = data["regeocode"]
+        comp = rg.get("addressComponent", {})
+        return GeoResult(
+            lat=lat, lng=lng,
+            display_name=rg.get("formatted_address", ""),
+            country=comp.get("country", ""),
+            province=comp.get("province", ""),
+            city=comp.get("city", "") or comp.get("province", ""),
+        )
+
+    async def search_nearby(self, lat: float, lng: float, keyword: str, radius: int = 5000) -> list[POI]:
+        resp = await self.client.get(
+            f"{self.BASE}/place/around",
+            params={"key": self.api_key, "location": f"{lng},{lat}",
+                    "keywords": keyword, "radius": radius, "offset": 10},
+        )
+        data = resp.json()
+        if data.get("status") != "1" or not data.get("pois"):
+            return []
+        return [
+            POI(name=p.get("name", ""), lat=float(p["location"].split(",")[1]),
+                lng=float(p["location"].split(",")[0]),
+                address=p.get("address", ""), category=p.get("type", ""))
+            for p in data["pois"]
+        ]
+
+    async def get_streetview(self, lat: float, lng: float) -> bytes | None:
+        return None  # Amap static map requires a different approach
+
+
 # ---------- Nominatim ----------
 
 class NominatimService(BaseMapService):
@@ -179,15 +244,17 @@ def create_map_service() -> MapServiceManager:
         return _map_service
 
     settings = get_settings()
-    primary_map = {
+    service_map = {
         "nominatim": NominatimService,
-    }.get(settings.map_service, NominatimService)()
+        "amap": AmapService,
+    }
+    primary_map = service_map.get(settings.map_service, NominatimService)()
 
     fallback_map = None
     if settings.map_service_fallback:
-        fallback_map = {
-            "nominatim": NominatimService,
-        }.get(settings.map_service_fallback, lambda: None)()
+        fb_cls = service_map.get(settings.map_service_fallback)
+        if fb_cls:
+            fallback_map = fb_cls()
 
     _map_service = MapServiceManager(primary_map, fallback_map)
     return _map_service
