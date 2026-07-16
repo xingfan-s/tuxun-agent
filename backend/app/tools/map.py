@@ -170,7 +170,14 @@ class MapServiceManager:
             return None
 
 
+_map_service: MapServiceManager | None = None
+
+
 def create_map_service() -> MapServiceManager:
+    global _map_service
+    if _map_service is not None:
+        return _map_service
+
     settings = get_settings()
     primary_map = {
         "nominatim": NominatimService,
@@ -182,4 +189,5 @@ def create_map_service() -> MapServiceManager:
             "nominatim": NominatimService,
         }.get(settings.map_service_fallback, lambda: None)()
 
-    return MapServiceManager(primary_map, fallback_map)
+    _map_service = MapServiceManager(primary_map, fallback_map)
+    return _map_service

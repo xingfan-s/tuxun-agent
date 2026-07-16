@@ -6,15 +6,15 @@ from PIL import Image
 from app.config import get_settings
 
 ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
-MAX_SIZE_MB = 20
 
 
 def validate_image(content_type: str, file_size: int) -> tuple[bool, str]:
     """Validate uploaded image. Returns (valid, error_message)."""
+    settings = get_settings()
     if content_type not in ALLOWED_TYPES:
         return False, f"不支持的文件格式：{content_type}，仅支持 JPG/PNG/WebP"
-    if file_size > MAX_SIZE_MB * 1024 * 1024:
-        return False, f"文件大小超过限制（{MAX_SIZE_MB}MB）"
+    if file_size > settings.max_file_size_mb * 1024 * 1024:
+        return False, f"文件大小超过限制（{settings.max_file_size_mb}MB）"
     return True, ""
 
 

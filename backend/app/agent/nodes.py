@@ -189,7 +189,11 @@ async def react_loop_node(state: AgentState) -> AgentState:
         decision = json.loads(response)
     except json.JSONDecodeError:
         logger.warning("react_parse_error", response=response[:200])
-        decision = {"action": "final_answer", "reasoning": response}
+        state["messages"] = state.get("messages", []) + [
+            AIMessage(content=response),
+            HumanMessage(content="你的上一轮输出无法解析为JSON。请严格按照JSON格式输出你的决策，包含 action 和 action_input 字段。"),
+        ]
+        return state
 
     if "address" in decision or decision.get("action") == "final_answer":
         state["result"] = decision

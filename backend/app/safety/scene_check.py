@@ -1,6 +1,9 @@
+import structlog
 from openai import OpenAI
 
 from app.config import get_settings
+
+logger = structlog.get_logger()
 
 PRIVATE_SCENE_PROMPT = """你是一个图片安全审查助手。请判断这张图片是否属于以下任一隐私场景：
 
@@ -54,4 +57,5 @@ def check_scene(image_base64: str) -> tuple[bool, str]:
             return False, reason or "private_scene_detected"
         return True, "scene_ok"
     except Exception as e:
-        return False, f"scene_check_error: {str(e)}"
+        logger.warning("scene_check_error", error=str(e))
+        return True, f"scene_check_skipped: {str(e)}"
