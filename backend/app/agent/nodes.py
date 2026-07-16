@@ -53,12 +53,24 @@ def _get_llm_client():
     return OpenAI(api_key=settings.qwen_api_key, base_url=settings.qwen_base_url)
 
 
+_ROLE_MAP = {"human": "user", "ai": "assistant", "system": "system"}
+
+
 def _llm_chat(messages: list, model: str = None, temperature: float = 0.1, max_tokens: int = 2000) -> str:
     settings = get_settings()
     client = _get_llm_client()
+
+    formatted = []
+    for m in messages:
+        if isinstance(m, dict):
+            formatted.append(m)
+        else:
+            role = _ROLE_MAP.get(getattr(m, "type", None), "user")
+            formatted.append({"role": role, "content": m.content})
+
     response = client.chat.completions.create(
         model=model or settings.qwen_model,
-        messages=messages,
+        messages=formatted,
         temperature=temperature,
         max_tokens=max_tokens,
     )
