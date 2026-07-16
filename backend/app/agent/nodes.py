@@ -186,6 +186,135 @@ def _parse_decision(response: str) -> dict | None:
     return None
 
 
+def _extract_location_from_result(tool_result: dict) -> list[float]:
+    """Extract lat/lng list from tool result data."""
+    data = tool_result.get("data")
+    if not data:
+        return []
+    lats = []
+    items = data if isinstance(data, list) else [data]
+    for item in items:
+        if isinstance(item, dict):
+            lat = item.get("lat")
+        elif hasattr(item, "lat"):
+            lat = item.lat
+        else:
+            continue
+        if lat is not None and isinstance(lat, (int, float)):
+            lats.append(float(lat))
+    return lats
+
+
+def _check_climate_mismatch(lats: list[float], clues: dict) -> str | None:
+    """Rule-based climate/vegetation consistency check. Returns warning or None."""
+    if not lats or not clues:
+        return None
+    avg_lat = sum(lats) / len(lats)
+
+    climate = clues.get("climate_zone", "")
+    veg = clues.get("vegetation", [])
+    hemi = clues.get("hemisphere", "")
+
+    tropical_veg = {"棕榈树", "椰子", "热带雨林", "芭蕉", "香蕉树", "椰子树", "榕树"}
+
+    if climate == "tropical" and abs(avg_lat) > 25:
+        return f"搜索结果在纬度{avg_lat:.0f}°（温带），但视觉显示热带气候"
+    if any(v in tropical_veg for v in veg) and abs(avg_lat) > 32:
+        return f"搜索结果在纬度{avg_lat:.0f}°，但图中可见热带植被（{set(veg) & tropical_veg}），不可能在这个纬度"
+    if hemi == "north" and avg_lat < -5:
+        return f"搜索结果在南半球（{avg_lat:.0f}°），但视觉提示北半球"
+    if hemi == "south" and avg_lat > 5:
+        return f"搜索结果在北半球（{avg_lat:.0f}°），但视觉提示南半球"
+    return None
+
+
+async def _cross_validate(state: AgentState, tool_name: str, tool_result: dict,
+                          tool_entry: dict) -> dict | None:
+    """Cross-validate tool results against visual clues.
+    If inconsistent, ask LLM to judge and return corrected region.
+    Returns None if consistent, or dict with corrected action."""
+    clues = state.get("clues") or {}
+    lats = _extract_location_from_result(tool_result)
+    if not lats:
+        return None
+
+    warning = _check_climate_mismatch(lats, clues)
+    if not warning:
+        return None
+
+    logger.info("cross_validate_mismatch", tool=tool_name, warning=warning)
+
+    # Ask LLM to validate and redirect
+    prompt = f"""视觉线索: {json.dumps(clues, ensure_ascii=False)}
+工具 "{tool_name}" 的搜索结果: {json.dumps(tool_result.get('data'), ensure_ascii=False, default=str)[:500]}
+
+{chr(10).join(['⚠️ 矛盾检测: ' + warning])}
+
+请判断：搜索结果是否与视觉线索矛盾？如果矛盾，应该在哪座城市或省份重新搜索？输出JSON:
+{{"consistent": true/false, "correct_region": "城市或省份名", "reasoning": "判断理由"}}"""
+
+    try:
+        response = _llm_chat([HumanMessage(content=prompt)], temperature=0, max_tokens=300)
+        decision = _parse_decision(response)
+        if decision and not decision.get("consistent", True):
+            return decision
+    except Exception as e:
+        logger.warning("cross_validate_error", error=str(e))
+    return None
+
+
+async def _apply_redirect(state: AgentState, original_tool: str,
+                          redirect: dict, loop_count: int, max_loops: int):
+    """Apply LLM redirect: geocode the corrected region and search nearby."""
+    region = redirect.get("correct_region", "")
+    if not region:
+        return
+
+    logger.info("cross_validate_redirect", region=region, reason=redirect.get("reasoning", ""))
+
+    # Step 1: geocode the corrected region
+    map_service = create_map_service()
+    geo_results = await _execute_tool("geocode", {"address": region}, state)
+    geo_lat = geo_lng = None
+    if geo_results["status"] == "success" and geo_results.get("data"):
+        items = geo_results["data"] if isinstance(geo_results["data"], list) else [geo_results["data"]]
+        if items:
+            first = items[0]
+            geo_lat = first.get("lat") if isinstance(first, dict) else (getattr(first, "lat", None))
+            geo_lng = first.get("lng") if isinstance(first, dict) else (getattr(first, "lng", None))
+
+    # Step 2: add correction info to state
+    state["tool_calls"] = state.get("tool_calls", []) + [{
+        "tool_name": "redirect",
+        "status": "success",
+        "input": {"original_tool": original_tool, "warning": redirect.get("reasoning", "")},
+        "output": f"已纠正搜索范围 → {region} ({geo_lat}, {geo_lng})",
+        "duration_ms": 0,
+    }]
+    state["messages"] = state.get("messages", []) + [
+        AIMessage(content=f"[交叉验证] 视觉线索与搜索结果矛盾，LLM判断应重新搜索: {region}。原因: {redirect.get('reasoning', '')}"),
+    ]
+
+    # Step 3: re-search in corrected region
+    if original_tool in ("search_place", "search_nearby", "search_landmark") and geo_lat and geo_lng:
+        tool_input = state["tool_calls"][-2].get("input", {}) if len(state.get("tool_calls", [])) >= 2 else {}
+        keyword = tool_input.get("keyword") or tool_input.get("query") or tool_input.get("description") or region
+        await push_step(state, 4, "tool_call", f"纠正搜索: search_nearby({region})",
+                        "running", {"lat": geo_lat, "lng": geo_lng, "keyword": keyword}, 0,
+                        40 + int(50 * loop_count / max_loops))
+        result = await _execute_tool("search_nearby",
+                                     {"lat": geo_lat, "lng": geo_lng, "keyword": keyword, "radius": 10000},
+                                     state)
+        state["tool_calls"] = state.get("tool_calls", []) + [{
+            "tool_name": "search_nearby", "status": result["status"],
+            "input": {"lat": geo_lat, "lng": geo_lng, "keyword": keyword, "radius": 10000},
+            "output": result.get("data"),
+            "error": result.get("error"),
+            "duration_ms": 0,
+            "redirected": True,
+        }]
+
+
 async def react_loop_node(state: AgentState) -> AgentState:
     """Node 4: ReAct reasoning loop."""
     settings = get_settings()
@@ -283,6 +412,13 @@ async def react_loop_node(state: AgentState) -> AgentState:
                     "message": f"工具 {tool_name} {tool_result['status']}: {tool_result.get('error', '')}",
                 }
             })
+
+    # Cross-validate tool results against visual clues
+    if tool_result["status"] == "success":
+        redirect = await _cross_validate(state, tool_name, tool_result, tool_entry)
+        if redirect:
+            # LLM redirected: auto re-search or geocode with corrected region
+            await _apply_redirect(state, tool_name, redirect, loop_count, max_loops)
 
     await push_step(state, 4, "tool_call", f"工具结果: {tool_name}",
                     "done", tool_entry, tool_elapsed,
