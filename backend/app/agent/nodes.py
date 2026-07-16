@@ -27,9 +27,9 @@ TOOL_MAP = {
 MAP_TOOLS = {"geocode", "reverse_geocode", "search_nearby", "get_streetview"}
 
 TOOL_TIMEOUTS = {
-    "search_place": 8, "geocode": 5, "reverse_geocode": 5,
-    "search_nearby": 8, "get_streetview": 15, "extract_exif": 3,
-    "search_landmark": 10, "reverse_image_search": 12,
+    "search_place": 15, "geocode": 15, "reverse_geocode": 15,
+    "search_nearby": 20, "get_streetview": 20, "extract_exif": 3,
+    "search_landmark": 15, "reverse_image_search": 15,
 }
 
 
