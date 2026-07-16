@@ -84,6 +84,7 @@ export function useSSE() {
       reconnectTimer = null
     }
     isConnected.value = false
+    reconnectAttempt.value = 5 // prevent onerror from reconnecting
   }
 
   onUnmounted(() => {
