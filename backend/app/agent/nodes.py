@@ -156,6 +156,36 @@ async def clue_extract_node(state: AgentState) -> AgentState:
     return state
 
 
+def _parse_decision(response: str) -> dict | None:
+    """Robust JSON extraction from LLM response. Handles markdown code blocks
+    and common key name variations."""
+    import re
+
+    # Try extracting from ```json ... ``` block
+    m = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", response, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    # Try extracting the first { } block
+    m = re.search(r"\{.*\}", response, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    # Try raw parse
+    try:
+        return json.loads(response)
+    except json.JSONDecodeError:
+        pass
+
+    return None
+
+
 async def react_loop_node(state: AgentState) -> AgentState:
     """Node 4: ReAct reasoning loop."""
     settings = get_settings()
@@ -197,9 +227,8 @@ async def react_loop_node(state: AgentState) -> AgentState:
     response = _llm_chat(messages, temperature=0.1, max_tokens=1500)
     elapsed = int((time.time() - t0) * 1000)
 
-    try:
-        decision = json.loads(response)
-    except json.JSONDecodeError:
+    decision = _parse_decision(response)
+    if decision is None:
         logger.warning("react_parse_error", response=response[:200])
         state["messages"] = state.get("messages", []) + [
             AIMessage(content=response),
@@ -214,8 +243,12 @@ async def react_loop_node(state: AgentState) -> AgentState:
                         elapsed, 40 + int(50 * loop_count / max_loops))
         return state
 
-    tool_name = decision.get("action") or decision.get("tool_name") or ""
-    tool_input = decision.get("action_input") or decision.get("tool_input") or {}
+    tool_name = (decision.get("action") or decision.get("tool_name")
+                 or decision.get("tool") or "")
+    tool_input = (decision.get("action_input") or decision.get("tool_input")
+                  or decision.get("query") or {})
+    if isinstance(tool_input, str):
+        tool_input = {"query": tool_input}
 
     if tool_name in state.get("failed_tools", set()):
         state["tool_calls"] = state.get("tool_calls", []) + [{
@@ -327,7 +360,7 @@ async def result_synthesize_node(state: AgentState) -> AgentState:
     """Node 5: Result synthesis."""
     t0 = time.time()
 
-    raw_result = state.get("result", {})
+    raw_result = state.get("result") or {}
     if raw_result.get("_action") == "final_answer" and raw_result.get("_reason") == "max_loops_reached":
         prompt_text = RESULT_SYNTHESIS_PROMPT.format(
             reasoning_history=json.dumps(state.get("tool_calls", []), ensure_ascii=False),
