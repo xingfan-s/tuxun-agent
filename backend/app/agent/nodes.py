@@ -244,7 +244,7 @@ async def react_loop_node(state: AgentState) -> AgentState:
         return state
 
     tool_name = (decision.get("action") or decision.get("tool_name")
-                 or decision.get("tool") or "")
+                 or decision.get("tool") or decision.get("tool_call") or "")
     tool_input = (decision.get("action_input") or decision.get("tool_input")
                   or decision.get("query") or {})
     if isinstance(tool_input, str):
