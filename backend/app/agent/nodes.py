@@ -361,28 +361,27 @@ async def result_synthesize_node(state: AgentState) -> AgentState:
     t0 = time.time()
 
     raw_result = state.get("result") or {}
+    fmt = {
+        "clues": json.dumps(state.get("clues", {}), ensure_ascii=False),
+        "exif_data": json.dumps(state.get("exif_data", {}), ensure_ascii=False),
+        "reasoning_history": json.dumps(state.get("tool_calls", []), ensure_ascii=False),
+    }
     if raw_result.get("_action") == "final_answer" and raw_result.get("_reason") == "max_loops_reached":
         prompt_text = RESULT_SYNTHESIS_PROMPT.format(
-            reasoning_history=json.dumps(state.get("tool_calls", []), ensure_ascii=False),
+            **fmt,
             final_output="已达到最大推理轮数，基于已有线索给出最佳推测。",
         )
         response = _llm_chat([HumanMessage(content=prompt_text)], temperature=0.1, max_tokens=1000)
-        try:
-            result = json.loads(response)
-        except json.JSONDecodeError:
-            result = raw_result
+        result = _parse_decision(response) or raw_result
     elif "address" in raw_result:
         result = raw_result
     else:
         prompt_text = RESULT_SYNTHESIS_PROMPT.format(
-            reasoning_history=json.dumps(state.get("tool_calls", []), ensure_ascii=False),
+            **fmt,
             final_output=json.dumps(raw_result, ensure_ascii=False),
         )
         response = _llm_chat([HumanMessage(content=prompt_text)], temperature=0.1, max_tokens=1000)
-        try:
-            result = json.loads(response)
-        except json.JSONDecodeError:
-            result = raw_result
+        result = _parse_decision(response) or raw_result
 
     tool_calls = state.get("tool_calls", [])
     total = len(tool_calls)

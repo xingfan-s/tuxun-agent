@@ -105,7 +105,13 @@ REACT_SYSTEM_PROMPT = """你是一个地理定位推理 Agent。你的目标是�
 
 RESULT_SYNTHESIS_PROMPT = """你是一个结果整合专家。根据 Agent 的推理过程和结果，整合成最终输出。
 
-## 推理过程
+## 视觉线索
+{clues}
+
+## EXIF 数据
+{exif_data}
+
+## 工具调用历史
 {reasoning_history}
 
 ## Agent 最终输出
@@ -115,8 +121,9 @@ RESULT_SYNTHESIS_PROMPT = """你是一个结果整合专家。根据 Agent 的�
 1. 地址不要包含门牌号，最多到街道/区级别
 2. 所有地名使用中文翻译
 3. 置信度根据线索明确程度评估（有路牌/文字直接定位→0.9+，仅靠植被和气候→0.5-）
+4. 即使工具调用失败了，也要基于视觉线索给出你的最佳推测，不要留空
 
-输出 JSON：
+输出 JSON（只输出 JSON，不要其他任何文字）：
 {{
     "address": "国家·省·城市",
     "country": "国家",
