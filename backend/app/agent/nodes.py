@@ -331,9 +331,7 @@ async def react_loop_node(state: AgentState) -> AgentState:
         "- geocode(address): 地址→经纬度",
         "- reverse_geocode(lat, lng): 经纬度→地址",
         "- search_nearby(lat, lng, keyword, radius=5000): 周边POI搜索",
-        "- get_streetview(lat, lng): 拉取街景图",
         "- search_landmark(description): 搜索著名地标",
-        "- reverse_image_search(image_base64, context?): 以图搜图",
     ])
 
     tool_results_text = json.dumps(state.get("tool_calls", []), ensure_ascii=False, indent=2)
