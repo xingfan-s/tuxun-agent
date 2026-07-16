@@ -14,6 +14,24 @@ def search_landmark(description: str) -> list[dict]:
     Returns:
         [{"title": str, "snippet": str, "url": str}, ...]
     """
+    # Try Wikipedia first, fall back to Amap
+    results = _search_wikipedia(description)
+    if results:
+        return results
+
+    # Fallback: Amap POI search
+    try:
+        from app.config import get_settings
+        settings = get_settings()
+        if settings.amap_api_key and settings.amap_api_key not in {"xxxxxxxx", ""}:
+            return _search_amap_poi(description, settings.amap_api_key)
+    except Exception:
+        pass
+
+    return results
+
+
+def _search_wikipedia(description: str) -> list[dict]:
     import requests
     try:
         resp = requests.get(
@@ -37,8 +55,37 @@ def search_landmark(description: str) -> list[dict]:
             })
         return results
     except Exception as e:
-        logger.error("landmark_search_error", error=str(e))
-        raise
+        logger.warning("landmark_wikipedia_error", error=str(e))
+        return []
+
+
+def _search_amap_poi(description: str, api_key: str) -> list[dict]:
+    """Use Amap POI text search for landmark queries."""
+    import asyncio
+
+    async def _do_search():
+        import httpx
+        params = {"key": api_key, "keywords": description, "offset": 5}
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://restapi.amap.com/v3/place/text", params=params
+            )
+        data = resp.json()
+        if data.get("status") != "1":
+            return []
+        results = []
+        for p in data.get("pois", [])[:5]:
+            results.append({
+                "title": p.get("name", ""),
+                "snippet": f"{p.get('address', '')} | {p.get('type', '')}",
+                "url": "",
+            })
+        return results
+
+    try:
+        return asyncio.run(_do_search())
+    except Exception:
+        return []
 
 
 def _clean_html(text: str) -> str:
