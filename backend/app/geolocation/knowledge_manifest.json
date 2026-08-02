@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "dataset_version": "2026-08-02",
+  "name": "china_geolocation_knowledge",
+  "sources": [
+    "Ministry of Transport road and license plate conventions",
+    "OpenStreetMap regional names",
+    "Curated visual geography rules"
+  ],
+  "notes": "Runtime constants remain backwards compatible; new records must carry source and version metadata."
+}

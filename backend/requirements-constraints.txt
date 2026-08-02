@@ -1,0 +1,19 @@
+# Keep optional AI packages from replacing the tested core image stack.
+numpy>=1.26,<2.0
+opencv-python<5
+opencv-python-headless<5
+opencv-contrib-python<5
+# Shared by OpenAI and PicImageSearch; both support the current client API.
+httpx==0.28.1
+
+# Newer Windows wheels currently fail to initialize c10.dll on the supported
+# Python 3.11 runtime. These versions are also compatible with GeoCLIP.
+torch==2.6.0
+torchvision==0.21.0
+
+# PaddleOCR 2.x inference fails with PaddlePaddle 3.x OneDNN fused operators.
+paddleocr==2.10.0
+paddlepaddle==2.6.2
+
+# Keep optional installs from replacing the core image stack.
+pillow==10.4.0

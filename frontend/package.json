@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc && vite build",
+    "typecheck": "vue-tsc --noEmit",
+    "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "test:unit": "vitest",
-    "lint": "eslint . --ext .vue,.js,.jsx,.ts,.tsx --fix --ignore-path .gitignore"
+    "lint": "eslint . --ext .vue,.js,.jsx,.ts,.tsx --ignore-path .gitignore",
+    "lint:fix": "eslint . --ext .vue,.js,.jsx,.ts,.tsx --fix --ignore-path .gitignore"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.0",
@@ -20,6 +22,7 @@
     "vue-router": "^4.3.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tsconfig/node20": "^20.1.9",
     "@types/node": "^20.11.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",

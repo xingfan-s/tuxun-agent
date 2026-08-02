@@ -1,5 +1,5 @@
 import httpx
-import structlog
+from app.utils.logging import structlog
 from langchain.tools import tool
 from app.config import get_settings
 
@@ -23,19 +23,36 @@ def search_place(query: str, region: str = "") -> list[dict]:
     if region:
         query = f"{query} {region}"
 
+    # 中国地理定位优先高德POI搜索（精度最高，数据最全）
+    amap_results = []
+    try:
+        if settings.amap_server_api_key not in _FAKE_KEYS:
+            amap_results = _search_amap_poi(query, region, settings.amap_server_api_key)
+    except Exception as e:
+        logger.warning("search_amap_failed", error=str(e))
+
+    # 补充通用搜索作为辅助
+    web_results = []
     try:
         if settings.search_service == "serpapi" and settings.serpapi_api_key not in _FAKE_KEYS:
-            return _search_serpapi(query, settings.serpapi_api_key)
-        elif settings.bing_search_api_key not in _FAKE_KEYS:
-            return _search_bing(query, settings.bing_search_api_key)
-        elif settings.amap_api_key not in _FAKE_KEYS:
-            return _search_amap_poi(query, region, settings.amap_api_key)
-        else:
-            logger.warning("search_no_api_key")
-            return [{"title": "搜索不可用", "snippet": "未配置搜索 API Key", "url": ""}]
+            web_results = _search_serpapi(query, settings.serpapi_api_key)
     except Exception as e:
-        logger.error("search_error", error=str(e))
-        raise
+        logger.warning("search_serpapi_failed", error=str(e))
+
+    if not web_results:
+        try:
+            if settings.bing_search_api_key not in _FAKE_KEYS:
+                web_results = _search_bing(query, settings.bing_search_api_key)
+        except Exception as e:
+            logger.warning("search_bing_failed", error=str(e))
+
+    # 高德结果在前（精度高），通用搜索在后
+    results = amap_results + web_results
+    if results:
+        return results
+
+    logger.warning("search_all_failed")
+    return [{"title": "搜索不可用", "snippet": "所有搜索服务均失败或未配置", "url": ""}]
 
 
 def _search_serpapi(query: str, api_key: str) -> list[dict]:
@@ -68,14 +85,12 @@ def _search_bing(query: str, api_key: str) -> list[dict]:
 
 def _search_amap_poi(query: str, region: str, api_key: str) -> list[dict]:
     """Use Amap POI text search as search_place backend."""
-    import asyncio
-
-    async def _do_search():
+    try:
         params = {"key": api_key, "keywords": query, "offset": 5}
         if region:
             params["city"] = region
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
+        with httpx.Client(timeout=10) as client:
+            resp = client.get(
                 "https://restapi.amap.com/v3/place/text", params=params
             )
         data = resp.json()
@@ -89,8 +104,5 @@ def _search_amap_poi(query: str, region: str, api_key: str) -> list[dict]:
                 "url": "",
             })
         return results
-
-    try:
-        return asyncio.run(_do_search())
     except Exception:
         return []

@@ -1,4 +1,4 @@
-import structlog
+from app.utils.logging import structlog
 from pathlib import Path
 from langchain.tools import tool
 import exifread

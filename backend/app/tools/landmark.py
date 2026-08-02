@@ -1,5 +1,5 @@
 from langchain.tools import tool
-import structlog
+from app.utils.logging import structlog
 
 logger = structlog.get_logger()
 
@@ -23,8 +23,8 @@ def search_landmark(description: str) -> list[dict]:
     try:
         from app.config import get_settings
         settings = get_settings()
-        if settings.amap_api_key and settings.amap_api_key not in {"xxxxxxxx", ""}:
-            return _search_amap_poi(description, settings.amap_api_key)
+        if settings.amap_server_api_key and settings.amap_server_api_key not in {"xxxxxxxx", ""}:
+            return _search_amap_poi(description, settings.amap_server_api_key)
     except Exception:
         pass
 
@@ -61,13 +61,11 @@ def _search_wikipedia(description: str) -> list[dict]:
 
 def _search_amap_poi(description: str, api_key: str) -> list[dict]:
     """Use Amap POI text search for landmark queries."""
-    import asyncio
-
-    async def _do_search():
+    try:
         import httpx
         params = {"key": api_key, "keywords": description, "offset": 5}
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
+        with httpx.Client(timeout=10) as client:
+            resp = client.get(
                 "https://restapi.amap.com/v3/place/text", params=params
             )
         data = resp.json()
@@ -81,9 +79,6 @@ def _search_amap_poi(description: str, api_key: str) -> list[dict]:
                 "url": "",
             })
         return results
-
-    try:
-        return asyncio.run(_do_search())
     except Exception:
         return []
 

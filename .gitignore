@@ -1,2 +1,34 @@
 .env
+.venv/
+.run/
+.cache/
 __pycache__/
+.claude/skills/
+
+# Local agent/editor tooling
+.agents/
+.claude/
+skills-lock.json
+.vscode/
+.idea/
+
+# Test and browser runtime output
+.pytest_cache/
+.playwright-cli/
+.playwright-mcp/
+backend/.pytest_cache/
+frontend/.pytest_cache/
+frontend/.playwright-cli/
+*.log
+
+# Large data files
+backend/data/
+backend/models/
+backend/uploads/
+*.faiss
+*.parquet
+*.jpg
+*.png
+*.pth
+*.bin
+*.safetensors

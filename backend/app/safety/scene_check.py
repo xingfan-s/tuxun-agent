@@ -1,4 +1,4 @@
-import structlog
+from app.utils.logging import structlog, redact_sensitive
 from openai import OpenAI
 
 from app.config import get_settings
@@ -31,13 +31,10 @@ def check_scene(image_base64: str) -> tuple[bool, str]:
     """
     settings = get_settings()
     if not settings.qwen_api_key:
-        return True, "no_api_key_configured"
+        logger.warning("scene_check_skipped_no_api_key")
+        return False, "安全服务未配置API密钥，无法进行场景检查"
 
-    client = OpenAI(
-        api_key=settings.qwen_api_key,
-        base_url=settings.qwen_base_url,
-    )
-
+    client = OpenAI(api_key=settings.qwen_api_key, base_url=settings.qwen_base_url)
     try:
         response = client.chat.completions.create(
             model=settings.qwen_vl_model,
@@ -57,5 +54,8 @@ def check_scene(image_base64: str) -> tuple[bool, str]:
             return False, reason or "private_scene_detected"
         return True, "scene_ok"
     except Exception as e:
-        logger.warning("scene_check_error", error=str(e))
+        logger.error("scene_check_failed", error=redact_sensitive(e))
+        if settings.safety_require_api:
+            return False, f"场景安全检查失败，请联系管理员"
+        logger.warning("scene_check_fail_open", error=str(e))
         return True, f"scene_check_skipped: {str(e)}"

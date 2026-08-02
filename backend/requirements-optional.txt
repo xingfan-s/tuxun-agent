@@ -1,0 +1,11 @@
+# Optional model/search capabilities. The Windows setup installs each item
+# independently so one unavailable wheel does not prevent the API from starting.
+# Install Torch first: PaddleOCR imports it through Albumentations, and Windows
+# must load Torch's DLLs before PaddlePaddle's runtime libraries.
+torch==2.6.0
+torchvision==0.21.0
+paddleocr==2.10.0
+paddlepaddle==2.6.2
+geoclip
+faiss-cpu
+PicImageSearch>=3.12

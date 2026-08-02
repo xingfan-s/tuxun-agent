@@ -1,15 +1,31 @@
-import asyncio
 import uuid
+from app.utils.logging import structlog
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, HTTPException, Request
+from fastapi import APIRouter, UploadFile, File, HTTPException, Header
 from fastapi.responses import StreamingResponse, FileResponse
 from app.schemas.task import TaskStatus, UploadResponse
-from app.services.agent_service import task_store, AgentService
+from app.services.agent_service import AgentService
+from app.services.event_bus import task_event_bus
+from app.services.task_repository import task_store
 from app.utils.image import validate_image, save_upload, delete_image
+from app.config import get_settings
+
+logger = structlog.get_logger()
 
 router = APIRouter()
 
 _agent_service: AgentService | None = None
+
+
+@router.get("/config")
+async def get_public_config():
+    """Return public runtime config for the frontend."""
+    from app.config import get_settings
+    settings = get_settings()
+    return {
+        "amap_api_key": settings.amap_web_key or "",
+        "map_service": settings.map_service,
+    }
 
 
 def get_agent_service() -> AgentService:
@@ -34,16 +50,39 @@ async def shutdown_agent():
 @router.post("/upload", response_model=UploadResponse, status_code=201)
 async def upload_image(file: UploadFile = File(...)):
     """Upload an image for geo-location analysis."""
-    content = await file.read()
+    try:
+        limit = get_settings().max_file_size_mb * 1024 * 1024
+        chunks: list[bytes] = []
+        size = 0
+        while True:
+            chunk = await file.read(min(1024 * 1024, limit + 1 - size))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            size += len(chunk)
+            if size > limit:
+                break
+        content = b"".join(chunks)
+    except Exception as e:
+        logger.error("upload_read_failed", error_type=type(e).__name__)
+        raise HTTPException(status_code=500, detail=f"读取文件失败: {str(e)}")
 
-    valid, error_msg = validate_image(file.content_type or "", len(content))
+    valid, error_msg = validate_image(file.content_type or "", len(content), content)
     if not valid:
         raise HTTPException(status_code=422, detail=error_msg)
 
-    file_path, _ = save_upload(content, file.filename or "image.jpg")
-    task_id = uuid.uuid4().hex[:12]
+    try:
+        file_path, _ = save_upload(content, file.filename or "image.jpg", file.content_type)
+    except OSError as e:
+        logger.error("upload_save_failed", error_type=type(e).__name__)
+        raise HTTPException(status_code=500, detail=f"保存文件失败（磁盘或权限问题）")
+    except Exception as e:
+        logger.error("upload_save_failed", error_type=type(e).__name__)
+        raise HTTPException(status_code=500, detail=f"保存文件失败: {str(e)}")
 
+    task_id = uuid.uuid4().hex[:12]
     task_store.create(task_id, file_path)
+    logger.info("upload_success", task_id=task_id, size=len(content))
 
     return UploadResponse(
         task_id=task_id,
@@ -61,42 +100,33 @@ async def get_task(task_id: str):
     return task
 
 
+@router.post("/task/{task_id}/start", response_model=TaskStatus)
+async def start_task(task_id: str):
+    """Idempotently enqueue a task; repeated calls return current state."""
+    if task_store.get(task_id) is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    task = await get_agent_service().start_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="图片不存在")
+    return task
+
+
 @router.get("/task/{task_id}/stream")
-async def stream_task(task_id: str):
+async def stream_task(task_id: str, last_event_id: int = Header(default=0, alias="Last-Event-ID")):
     """SSE stream for real-time task progress."""
     task = task_store.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    event_queue: asyncio.Queue = asyncio.Queue()
-
-    if task.status in ("done", "failed", "rejected"):
-        if task.status == "done" and task.result:
-            await event_queue.put({
-                "event": "result", "data": task.result.model_dump(),
-            })
-        elif task.status == "rejected":
-            await event_queue.put({
-                "event": "error",
-                "data": {"message": task.safety_reason or "安全预检未通过", "step": 0, "recoverable": False},
-            })
-        elif task.status == "failed":
-            await event_queue.put({
-                "event": "error",
-                "data": {"message": task.error or "分析失败", "step": -1, "recoverable": False},
-            })
-        await event_queue.put(None)
-    else:
-        image_path = task_store.get_image(task_id)
-        if image_path is None:
-            raise HTTPException(status_code=404, detail="图片不存在")
-
-        agent_service = get_agent_service()
-        await agent_service.enqueue(task_id, image_path, event_queue)
-
+    subscriber_id, subscribed_queue = task_event_bus.subscribe(task_id, max(0, last_event_id))
+    if task.status in ("done", "failed", "rejected", "cancelled", "expired"):
+        task_event_bus._put_nowait(subscribed_queue, None)
     from app.utils.sse import sse_event_generator
     return StreamingResponse(
-        sse_event_generator(event_queue),
+        sse_event_generator(
+            subscribed_queue,
+            on_close=lambda: task_event_bus.unsubscribe(task_id, subscriber_id),
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -124,9 +154,19 @@ async def get_task_image(task_id: str):
 
 @router.delete("/task/{task_id}", status_code=204)
 async def delete_task(task_id: str):
-    """Delete a task and its image."""
+    """Request cancellation; the worker owns final cleanup."""
+    task = task_store.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
     image_path = task_store.get_image(task_id)
-    if image_path:
+    was_pending = task.status in ("uploaded", "queued")
+    cancelled = task_store.request_cancel(task_id)
+    if cancelled and was_pending:
+        get_agent_service()._publish(task_id, {
+            "event": "error",
+            "data": {"message": "任务已取消", "cancelled": True, "recoverable": False},
+        })
+        task_event_bus.close(task_id)
+    if image_path and was_pending:
         delete_image(image_path)
-    task_store.remove(task_id)
     return None
