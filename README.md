@@ -89,23 +89,6 @@ Copy-Item backend\.env.example backend\.env
 提交历史，仅从当前文件删除是不够的，应立即在服务商控制台撤销并重新生成 Key，
 然后清理 Git 历史。
 
-## 评测与诊断
-
-评测集必须与 FAISS 检索索引按图片哈希和来源 ID 隔离，并为每张图片标注
-`landmark`、`street`、`nature`、`ocr_strong`、`ocr_weak`、`night`、
-`low_resolution` 或 `non_china` 切片。用 JSONL 运行 baseline：
-
-```powershell
-cd backend
-..\.venv\Scripts\python.exe scripts\evaluate_predictions.py dataset.jsonl --output report.json
-```
-
-校准文件使用 `method=isotonic`、`version=1`、`thresholds` 和 `probabilities`
-字段；未配置校准文件时，界面只显示“候选得分”，不会伪装成概率。
-
-生产诊断端点为 `/health/live`、`/health/ready` 和 `/metrics`。默认界面不展示
-原始步骤 JSON；仅在开发环境设置 `VITE_DIAGNOSTICS=true` 时开启诊断详情。
-
 ## 文档与贡献
 
 - [系统架构](docs/architecture.md)

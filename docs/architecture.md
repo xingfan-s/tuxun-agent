@@ -76,7 +76,7 @@ frontend/src/
 
 ## 数据与模型
 
-模型权重、FAISS 索引、上传图片和运行日志不提交到 Git。启动时 `/health/ready` 检查索引、模型能力和任务存储；本地已有完整 Hugging Face 快照时，GeoCLIP/CLIP 使用离线模式加载。
+模型权重、FAISS 索引、上传图片和运行日志不提交到 Git。启动时 `/health/ready` 检查索引、模型能力和任务存储；本地已有完整 Hugging Face 快照时，GeoCLIP/CLIP 使用离线模式加载。生产诊断端点为 `/health/live`、`/health/ready` 和 `/metrics`。
 
 ## 测试与 CI
 
