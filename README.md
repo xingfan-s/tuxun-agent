@@ -18,9 +18,9 @@
 
 详细索引见 [docs/README.md](docs/README.md)。
 
-## Windows 原生启动
+## Windows 
 
-不需要 WSL、Linux shell 或 Docker。先安装 Python 3.11 x64 和 Node.js 20+ LTS，
+先安装 Python 3.11 x64 和 Node.js 20+ LTS，
 然后在 PowerShell 或双击命令文件执行：
 
 ```powershell
@@ -106,27 +106,8 @@ cd backend
 生产诊断端点为 `/health/live`、`/health/ready` 和 `/metrics`。默认界面不展示
 原始步骤 JSON；仅在开发环境设置 `VITE_DIAGNOSTICS=true` 时开启诊断详情。
 
-## 检查
-
-```powershell
-cd frontend
-npm run typecheck
-npm run lint
-npm run test:unit -- --run
-npm run build
-```
-
-后端检查：
-
-```powershell
-cd backend
-..\.venv\Scripts\python.exe -m pytest -q -p no:cacheprovider
-```
-
 ## 文档与贡献
 
 - [系统架构](docs/architecture.md)
 - [贡献指南](CONTRIBUTING.md)
 - [MIT License](LICENSE)
-
-提交代码前请运行与 `.github/workflows/ci.yml` 对应的后端和前端检查。Issue 和 Pull Request 请使用仓库提供的模板。
